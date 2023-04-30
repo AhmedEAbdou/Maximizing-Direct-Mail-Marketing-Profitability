@@ -1,0 +1,225 @@
+---
+title: "415-prj-3"
+author: "Ahmed Abdou"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rpart)
+library(tidyverse)
+
+```
+
+## Background
+
+* Tayko is a software catalog firm that sells games and education software.
+
+* In an attempt to expand its customer base, it has recently joined a consortium of similar catalog firms.
+
+* As a member of the consortium, Tayko can pull 200000 names from the poll.
+
+* Tayko would like to select the names with the best chance of performing well (This is the business problem).
+
+* The analytics problem is to develop one predictive model that classifies customers into purchasers or non-purchasers and another model that predicts the amount those purchasers would spend.
+
+
+## Data 
+
+* The response variable
+
+* The predictors
+
+* Data dictionary
+
+Part 1:
+Estimate the gross profit for the remaining 18,000.
+
+```{r}
+D = read.csv("Tayko.csv")
+
+names(D)
+D = D[, -1]
+
+
+```
+
+```{r}
+
+mean_spending <- mean(D$Spending)
+
+exp_pursh <- 180000*0.053
+
+total_rev <- exp_pursh *mean_spending
+total_cost <- 180000*2
+gross_prof <- total_rev - total_cost
+gross_prof
+
+
+```
+
+
+## Partition
+
+```{r}
+n = nrow(D)
+n1=800
+n2=700
+n3=500
+permuted.index = sample(1:n)
+
+D = D[permuted.index, ]
+
+train = D[1:n1, ]
+valid = D[(n1+1):(n1+n2), ]
+holdout = D[(n1+n2+1):n, ]
+
+library(caret)
+
+recipe = preProcess(train, method = "range")
+train.norm = predict(recipe, train)
+valid.norm = predict(recipe, valid)
+holdout.norm = predict(recipe, holdout)
+
+
+```
+
+## Model 1: Logistic regression model
+
+```{r, warning = FALSE}
+
+logistic.model = glm(Purchase ~ . - Spending, data = train.norm, family = binomial)
+
+selected.logistic.model = step(logistic.model, direction = "backward", trace = 0)
+
+pred.prob = predict(selected.logistic.model, newdata = holdout.norm, type = "response")
+
+```
+
+
+## Model 2: Multiple linear regression
+
+```{r, warning  = FALSE}
+train.subset = subset(train.norm, Purchase==1)
+
+valid.subset = subset(valid.norm, Purchase==1)
+
+multiple.reg = lm(Spending ~ . - Purchase, data = train.subset)
+selected.multiple.reg = step(multiple.reg, direction = "both", trace = 0)
+
+
+pred.spending.lr = predict(selected.multiple.reg, newdata = valid.subset)
+pred.spending.lr.forHoldout = predict(selected.multiple.reg, newdata = holdout.norm)
+
+
+plot(pred.spending.lr, valid.subset$Spending)
+
+forecast::accuracy(pred.spending.lr, valid.subset$Spending)
+```
+
+
+## Model 3: Regression tree
+
+```{r}
+model.trees <- rpart(Spending ~ ., 
+             data = train.subset,
+             control = rpart.control(maxdepth=10,    
+                                     minsplit = 20, 
+                                     minbucket = 6, 
+                                     cp = 0.01  ))                                
+pred.spending.trees = predict(model.trees, newdata = valid.subset)
+pred.spending.trees.forHoldout = predict(model.trees, newdata = holdout.norm)
+
+
+plot(pred.spending.trees, valid.subset$Spending)
+
+forecast::accuracy(pred.spending.trees, valid.subset$Spending)
+```
+
+The Linear model did perform slightly better for predicting Spending, as it has a lower RMSE of 0.1057404  compared to the regression trees model which has RMSE of 0.1107092
+
+
+Part4:
+
+## Lift chart of the expected spending
+
+```{r}
+holdout.norm$pred.prob = pred.prob
+holdout.norm$pred.spending.forHoldout = pred.spending.lr.forHoldout
+holdout.norm$adj.pred.prob = pred.prob*0.107
+holdout.norm$exp_spending = holdout.norm$adj.pred.prob *pred.spending.lr.forHoldout
+
+score_Analysis <- holdout.norm
+```
+
+creating lift chart function.
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+
+suppressMessages(library(forecast))  # To use the accuracy() function
+
+suppressMessages(library(caret))
+
+suppressMessages(library(NHANES))
+
+suppressMessages(library(tidyverse))
+
+suppressMessages(library(yardstick))  # For ROC
+
+suppressMessages(library(gains))  # For gains table
+
+# The following code creates a lift chart for classification models
+
+## Plot lift charts
+plot.lift = function(pred.prob, actual, groups = 10){
+    library(gains)
+    gain <- gains(actual = actual, 
+                  predicted = pred.prob, 
+                  groups=groups
+    )
+    
+    par(mfrow=c(1,2))
+    # plot lift chart
+    plot(c(0,gain$cume.pct.of.total*sum(actual))~c(0,gain$cume.obs), 
+         xlab="# Observations", 
+         ylab="The Number of 1's", col = "blue",
+         #main="The Cumulative Lift Chart", 
+         #sub = paste0("(% of 1's", " is ", round(mean(actual)*100,2), "%)"),
+         type="l",
+         #asp = 1,
+         xlim = c(0, length(actual)),
+         ylim = c(0, sum(actual)*1.0),
+         main = "The Cumulative Lift Chart"
+    )
+    #mtext(text = "The Cumulative Lift Chart", side=3, line=2, cex=1)
+    mtext(text = paste0("(% of 1's in actual response", " is ", round(mean(actual)*100,2), "%)"),
+          side=3, line=0.5, cex=1)
+    lines(c(0,sum(actual))~c(0, length(actual)), lty=2)
+    
+    # compute deciles and plot decile-wise chart
+    heights <- gain$mean.resp/mean(actual)
+    
+    par(mgp=c(3, 1.5, 0)) # Adjust tick mark position
+    midpoints <- barplot(heights,
+                       names.arg = gain$depth,
+                       ylim = c(0, max(gain$lift/100))*1.1,
+                       xlab = "Percentile", ylab = "Lift", main = "Decile-wise Lift Chart")
+    
+    # add labels to columns
+    text(midpoints, heights, labels=round(heights, 1), cex = 0.9, pos = 3, col = "blue")
+    par(mfrow=c(1,1))
+    
+    D = data.frame(Oberserved = actual, Propensity = pred.prob)
+    pp = D$Propensity
+    D = D[order(-pp), ]
+    invisible(list(sorted.data = D , gain=gain))
+}
+```
+
+```{r}
+plot.lift(score_Analysis$exp_spending, holdout.norm$Spending)
+
+```
+
+The gross profit that would result from mailing to the 180,000 is `180000 *3.6` = 648000
+
