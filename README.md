@@ -1,4 +1,4 @@
-# Maximizing-Direct-Mail-Marketing-Profitability-Using-R
+#Maximizing Direct Mail Marketing Profitability
 
 Optimizing Direct Mail Marketing for Tayko Software Cataloger through Predictive Analytics and Data Mining
 
